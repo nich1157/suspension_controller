@@ -8,11 +8,8 @@
 
 
 // TODO:
-// - Add a saturation and minimum error required on delta_d
-// - Tune PID
-// - Other controllers
-// - Delete writeout - switch with publisher
-// - Test filter on real IMU
+// - Tune PID + windup
+// - LQR: C 2x3, Tune, better LQR-function
 
 
 namespace suspension_controller {
@@ -83,12 +80,22 @@ namespace suspension_controller {
       try {
         // Control mode
         std::string mode = get_node()->get_parameter("control_mode").as_string();
-        RCLCPP_INFO(get_node()->get_logger(), "control_mode = %s", mode.c_str());
+        RCLCPP_INFO(get_node()->get_logger(), "Control mode selected: %s", mode.c_str());
     
-        if (mode == "PID_Base")
-          control_mode_ = PID_Base;
-        else
-          control_mode_ = DISABLED;
+        if (mode == "PID_Base") {
+            control_mode_ = PID_Base;
+        } 
+        else if (mode == "LQR") {
+            control_mode_ = LQR;
+        } 
+        else if (mode == "DISABLED") {
+            control_mode_ = DISABLED;
+        } 
+        else {
+            RCLCPP_WARN(get_node()->get_logger(), "Unknown control mode '%s'. Defaulting to DISABLED.", mode.c_str());
+            control_mode_ = DISABLED;
+        }
+    
     
         // Reference pose
         auto ref = get_node()->get_parameter("reference_pose").as_double_array(); // check if reference has three entries
@@ -98,7 +105,7 @@ namespace suspension_controller {
         }
         P_r_ = Eigen::Vector3d(ref[0], ref[1], ref[2]);
     
-        // Gains
+        // PID Gains
         auto kp = get_node()->get_parameter("K_P").as_double_array();
         auto ki = get_node()->get_parameter("K_I").as_double_array();
         auto kd = get_node()->get_parameter("K_D").as_double_array();
@@ -117,7 +124,15 @@ namespace suspension_controller {
           K_I_(i, i) = ki[i];
           K_D_(i, i) = kd[i];
         }
-        
+
+        // LQR Gains
+        Q_ = Eigen::Matrix3d::Zero();
+        Q_(0,0) = 1.0;   // theta error penalty
+        Q_(1,1) = 1.0;   // roll error penalty
+        Q_(2,2) = 0.1;    // z error penalty
+
+        R_ = 1 * Eigen::Matrix4d::Identity();  // actuator penalty
+
         // Reset error terms
         e_prev_ = Eigen::Vector3d::Zero();
         e_int_ = Eigen::Vector3d::Zero();
@@ -217,6 +232,12 @@ namespace suspension_controller {
                 runPIDBase(period);
                 break;
 
+            case LQR:
+                RCLCPP_INFO_THROTTLE(get_node()->get_logger(), *get_node()->get_clock(), 2000,
+                "SuspensionController::Inside LQR");
+                runLQRControl(period);
+                break;
+
             case DISABLED:
 
             default:
@@ -301,6 +322,50 @@ namespace suspension_controller {
             }
             
     }
+
+    // Func 2: LQR control
+    void SuspensionController::runLQRControl(const rclcpp::Duration& period) {
+      const double dt = period.seconds();
+  
+      // Step 1: Get pose and actuator states
+      Eigen::Vector3d P_mea = getMeasuredChassisPose();
+      Eigen::Vector4d d_current = getActuatorPositions();
+  
+      // Step 2: Linearize system around current actuator position
+      Eigen::Matrix<double, 4, 4> J0_full = manualJacobianFK4DOF(d_current[0], d_current[1], d_current[2], d_current[3]);
+      Eigen::Matrix<double, 3, 4> J0 = J0_full.topRows<3>(); // θ, φ, z
+  
+      Eigen::Matrix3d A = Eigen::Matrix3d::Identity();
+      Eigen::Matrix<double, 3, 4> B = J0;
+      Eigen::Matrix3d C = Eigen::Matrix3d::Identity();
+      // C = C.topRows<2>(); // θ, φ
+      Eigen::Matrix<double, 3, 4> D = Eigen::Matrix<double, 3, 4>::Zero();
+  
+      // Step 3: Solve LQR
+      K_ = solveContinuousLQR(A, B, Q_, R_);
+      
+  
+      // Step 4: Closed-loop system for feedforward
+      //Eigen::Matrix<double, 3, 4> BK = B * K_;
+      Eigen::Matrix3d A_cl = A - (B*K_);
+      Eigen::Matrix<double, 3, 4> dcgain = A_cl.inverse() * B;
+      K0_ = dcgain.completeOrthogonalDecomposition().pseudoInverse();
+      
+      // Step 5: Control law
+      Eigen::Vector3d e = P_mea - P_r_;
+      Eigen::Vector4d delta_d = -K_ * e; // + K0_ * P_r_;
+  
+      // Step 6: Apply delta and saturate
+      Eigen::Vector4d d_new = d_current + delta_d;
+      for (int i = 0; i < 4; ++i)
+          d_new[i] = std::clamp(d_new[i], 0.0, 0.175);
+  
+      // Step 7: Send commands
+      for (int i = 0; i < 4; ++i) {
+          command_interfaces_[i].set_value(d_new[i]);
+      }
+  }
+  
 
 
 
@@ -464,6 +529,17 @@ namespace suspension_controller {
     
       return J;
     }
+
+
+    // LQR solver - Need upgrade
+    Eigen::Matrix<double, 4, 3> SuspensionController::solveContinuousLQR(const Eigen::Matrix3d& A, const Eigen::Matrix<double, 3, 4>& B, const Eigen::Matrix3d& Q, const Eigen::Matrix4d& R){
+      
+      // Approximate LQR solution: K ≈ (R⁻¹ * Bᵀ * Q)
+      Eigen::Matrix<double, 4, 3> K_approx = R.inverse() * B.transpose() * Q;
+      return K_approx;
+    }
+  
+  
     
 
 

@@ -35,7 +35,7 @@ public:
   
 
 private:
-  enum ControlMode { PID_Base, DISABLED };
+  enum ControlMode { PID_Base, LQR, DISABLED };
   ControlMode control_mode_;
 
   // PID
@@ -43,6 +43,14 @@ private:
   Eigen::Vector3d e_prev_;
   Eigen::Vector3d e_int_;
   Eigen::Matrix3d K_P_, K_I_, K_D_;
+
+  // LQR
+  Eigen::Matrix3d Q_;
+  Eigen::Matrix4d R_;
+  Eigen::Matrix<double, 4, 3> K_;   
+  Eigen::Matrix<double, 4, 3> K0_;   
+  rclcpp::Time last_update_time_;
+
 
   // IMU filter
   rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_sub_;
@@ -60,6 +68,7 @@ private:
 
   // Core control
   void runPIDBase(const rclcpp::Duration &period);
+  void runLQRControl(const rclcpp::Duration& period);
 
   // Helpers
   Eigen::Vector3d getMeasuredChassisPose();
@@ -67,6 +76,8 @@ private:
   Eigen::Matrix<double, 3, 4> manualJacobianFK(const Eigen::Vector4d &d);
   std::tuple<double, double, double, double, double, double> suspensionFK(double d_LF, double d_LR, double d_RF, double d_RR);
   Eigen::Matrix<double, 4, 4> manualJacobianFK4DOF(double d_LF, double d_LR, double d_RF, double d_RR);
+  Eigen::Matrix<double, 4, 3> solveContinuousLQR(const Eigen::Matrix3d& A, const Eigen::Matrix<double, 3, 4>& B, const Eigen::Matrix3d& Q, const Eigen::Matrix4d& R);
+
 };
 
 } // namespace suspension_controller
