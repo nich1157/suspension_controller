@@ -14,6 +14,7 @@ find_package(pluginlib REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(tf2 REQUIRED)
+find_package(Ceres REQUIRED)
 
 # Build the plugin library
 add_library(${PROJECT_NAME} SHARED
@@ -24,6 +25,7 @@ add_library(${PROJECT_NAME} SHARED
 target_include_directories(${PROJECT_NAME} PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   ${EIGEN3_INCLUDE_DIRS}
+  ${CERES_INCLUDE_DIRS}
 )
 
 # Link libraries
@@ -35,7 +37,13 @@ ament_target_dependencies(${PROJECT_NAME}
   Eigen3
   sensor_msgs
   tf2
+  Ceres
 )
+
+target_link_libraries(${PROJECT_NAME}
+  ${CERES_LIBRARIES}
+)
+
 
 # Export the plugin description
 pluginlib_export_plugin_description_file(controller_interface suspension_controller_plugins.xml)
