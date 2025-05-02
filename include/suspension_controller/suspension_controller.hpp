@@ -40,6 +40,10 @@ namespace suspension_controller {
       enum ControlMode { PID_Base, LQR, IK_Based, PID_w_Terrain, PID_w_Terrain_Square, PID_Complete, DISABLED };
       ControlMode control_mode_;
 
+      // Tip-over angles
+      double phi_max_;
+      double theta_max_;
+
       // PID
       Eigen::Vector4d P_r_;
       Eigen::Vector3d e_prev_;
@@ -56,7 +60,7 @@ namespace suspension_controller {
       rclcpp::Time last_update_time_;
 
       // Terrain
-      double lambda_ = 0.0001; // Regularization weight for terrain estimation
+      double lambda_ = 0.001; // Regularization weight for terrain estimation
 
 
       // IMU filter
@@ -95,6 +99,7 @@ namespace suspension_controller {
       Eigen::Matrix<double, 4, 3> solveContinuousLQR(const Eigen::Matrix3d& A, const Eigen::Matrix<double, 3, 4>& B, const Eigen::Matrix3d& Q, const Eigen::Matrix4d& R);
       Eigen::Vector4d solveSuspensionIK(const Eigen::Vector3d& target_pose, const Eigen::Vector4d& d_initial);
       Eigen::Vector4d estimateTerrainLASSO(const Eigen::Matrix<double, 3, 4> &J, const Eigen::Vector3d &residual, const Eigen::Vector4d &weights, double lambda);
+      std::tuple<double, double> maxAngles(double z, double phi, double theta);
 
     };
 
