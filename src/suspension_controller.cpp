@@ -5,29 +5,6 @@
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2/LinearMath/Matrix3x3.h>
 #include <mutex>
-//#include <ceres/ceres.h>
-#include <liblm/regressor.h>
-
-
-
-// TODO:
-// - 1. PID Base: Tune PID + windup
-// - 2. LQR: C 2x3, Tune, better LQR-function
-// - 3. IK: implementation of solveSuspensionIK() w/ ceres. Counterpart to suspensionIKObjective() in MATLAB
-// - 4. PID w/ terrain: maybe implement LASSO terrain estimation + plot terrain estimate
-// - 5. PID w/ square: Lasso + yaw reference same as locomotion. (scheme doesnt work well, maybe because terrain estimation is off without diff-gear kineamtics)
-// - 6. Kalman filter: Noise values, publish kalman estimate, Lasso
-
-// - yaw the correct sign?
-
-
-// COMMENTS:
-// - 1. Performs well
-// - 2. unstable: maybe due to lqr cannot be tuned on no dynamics nor can pole placement
-// - 3: to idealized to work in reality, since itsnt robust for terrain or offset from targets. Open-loop control which works flat and stationary
-// - 4: unstable, since the terrain estimation is non-sparse due to insuffienct lasso in c++
-
-
 
 namespace suspension_controller {
 
@@ -89,10 +66,7 @@ namespace suspension_controller {
             M_PI / 180.0 * 0.1    // yaw noise   [rad]
           };
 
-        
-
-        // MISSING: declare what joints you are controlling from input
-        // ALSO: can PID be overridden by yaml??
+      
 
         return controller_interface::CallbackReturn::SUCCESS;
     }
@@ -121,9 +95,6 @@ namespace suspension_controller {
         else if (mode == "PID_w_Terrain") {
             control_mode_ = PID_w_Terrain;
         }
-        else if (mode == "PID_w_Terrain_Square") {
-            control_mode_ = PID_w_Terrain_Square;
-        }
         else if (mode == "PID_Complete") {
             control_mode_ = PID_Complete;
         }
@@ -137,7 +108,7 @@ namespace suspension_controller {
     
     
         // Reference pose
-        auto ref = get_node()->get_parameter("reference_pose").as_double_array(); // check if reference has three entries
+        auto ref = get_node()->get_parameter("reference_pose").as_double_array(); // check if reference has four entries
         if (ref.size() != 4) {
           RCLCPP_INFO(get_node()->get_logger(), "Control mode selected: %s", mode.c_str());
           return controller_interface::CallbackReturn::ERROR;
@@ -216,8 +187,8 @@ namespace suspension_controller {
       
           // Gz to FK frame adjustment (180° around X)
           pitch = -pitch; 
-          roll  = -roll; // WHY ROLL NEGATIVE WHEN ROTATION AROUND X!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-          yaw = yaw; // Correct?
+          roll  = -roll; 
+          yaw = yaw; 
       
           // Median filtering - spike removal
           pitch_window_.push_back(pitch);
@@ -309,12 +280,6 @@ namespace suspension_controller {
                 runPIDWithTerrain(period);
                 break;    
 
-            case PID_w_Terrain_Square:
-                RCLCPP_INFO_THROTTLE(get_node()->get_logger(), *get_node()->get_clock(), 2000,
-                "SuspensionController::Inside PID with terrain square");
-                runPIDWithTerrainSquare(period);
-                break;
-
             case PID_Complete:
                 RCLCPP_INFO_THROTTLE(get_node()->get_logger(), *get_node()->get_clock(), 2000,
                 "SuspensionController::Inside PID complete");
@@ -385,7 +350,7 @@ namespace suspension_controller {
             return;
         }
 
-        // Print outs (Can delete)
+        // Print outs 
         RCLCPP_INFO(get_node()->get_logger(), "pitch %.2f", P_mea[0]*180/M_PI);
         RCLCPP_INFO(get_node()->get_logger(), "roll %.2f", P_mea[1]*180/M_PI);
         RCLCPP_INFO(get_node()->get_logger(), "z %.2f", P_mea[2]);
@@ -427,14 +392,12 @@ namespace suspension_controller {
       Eigen::Matrix3d A = Eigen::Matrix3d::Identity();
       Eigen::Matrix<double, 3, 4> B = J0;
       Eigen::Matrix3d C = Eigen::Matrix3d::Identity();
-      // C = C.topRows<2>(); // θ, φ
       Eigen::Matrix<double, 3, 4> D = Eigen::Matrix<double, 3, 4>::Zero();
   
       // Step 3: Solve LQR
-      K_ = solveContinuousLQR(A, B, Q_, R_);
+      K_ = solveLQR(A, B, Q_, R_);
       
       // Step 4: Closed-loop system for feedforward
-      //Eigen::Matrix<double, 3, 4> BK = B * K_;
       Eigen::Matrix3d A_cl = A - (B*K_);
       Eigen::Matrix<double, 3, 4> dcgain = A_cl.inverse() * B;
       K0_ = dcgain.completeOrthogonalDecomposition().pseudoInverse();
@@ -468,20 +431,7 @@ namespace suspension_controller {
         Eigen::Vector3d target_pose = P_r_.head<3>();  // [theta, roll, z] reference
         
         // Step 4: Solve full IK optimization to find next actuator state
-
-        // TARGET_POSE SHOULD MAYBE BE DELTA_POSE OR D_CURRENT SHOULD BE AN INPUT!!!!!!!!!!!!!!!!!
-
         Eigen::Vector4d d_new = solveSuspensionIK(target_pose, d_current);
-
-        RCLCPP_INFO(get_node()->get_logger(), "pitch %.2f", P_mea[0]*180/M_PI);
-        RCLCPP_INFO(get_node()->get_logger(), "roll %.2f", P_mea[1]*180/M_PI);
-        RCLCPP_INFO(get_node()->get_logger(), "z %.2f", P_mea[2]);
-
-
-        RCLCPP_INFO(get_node()->get_logger(), "dLF %.2f", d_new[0]);
-        RCLCPP_INFO(get_node()->get_logger(), "dLR %.2f", d_new[1]);  
-        RCLCPP_INFO(get_node()->get_logger(), "dRF %.2f", d_new[2]);
-        RCLCPP_INFO(get_node()->get_logger(), "dRR %.2f", d_new[3]);
 
         // Step 5: Clamp actuator positions to physical limits
         for (int i = 0; i < 4; ++i) {
@@ -516,8 +466,8 @@ namespace suspension_controller {
       // Step 5: Pose error residual
       Eigen::Vector3d residual = P_mea - P_est;
   
-      // Step 6: LASSO terrain estimation (simplified shrinkage)
-      //Eigen::Vector4d weights(1.0, 1.0, 1.0, 1.0); // CHange
+      // Step 6: LASSO terrain estimation 
+      //Eigen::Vector4d weights(1.0, 1.0, 1.0, 1.0);
       //Eigen::Matrix<double, 3, 4> Jw = J;
       //for (int i = 0; i < 4; ++i)
       //    Jw.col(i) /= weights[i];
@@ -536,7 +486,6 @@ namespace suspension_controller {
       Eigen::Vector4d terrain_est = tot - d_prev;
   
       // Step 7: PID control
-      //Eigen::Vector3d e = P_r_.head<3>() - P_est;  !!!!!! estimate pose or measured !!!!!!!!!!!!!!!!!!!!!!
       Eigen::Vector3d e = P_r_.head<3>() - P_mea;
       Eigen::Vector3d e_dot = (e - e_prev_.head<3>()) / dt;
       e_int_ += e * dt;
@@ -549,14 +498,6 @@ namespace suspension_controller {
   
       Eigen::Matrix<double, 4, 3> J_pinv = J.completeOrthogonalDecomposition().pseudoInverse();
       Eigen::Vector4d delta_d = J_pinv * (u);// - J * terrain_est);
-
-      const double delta_threshold = 0.0002;  // 2 mm - minimum delta_d magnitude worth updating
-      for (int i = 0; i < 4; ++i) {
-        if (std::abs(delta_d[i]) < delta_threshold) {
-          delta_d[i] = 0.0;
-        }
-      }
-
 
       // Check for NaN values in delta_d
       if (!delta_d.allFinite()){
@@ -595,59 +536,6 @@ namespace suspension_controller {
       }
       terrain_pub_->publish(msg);
 
-    }
-
-    // Func 5: PID with terrain square
-    void SuspensionController::runPIDWithTerrainSquare(const rclcpp::Duration &period) {
-      const double dt = period.seconds();
-    
-      // Step 1: Measured pose [theta, roll, z, yaw]
-      Eigen::Vector4d P_mea = getMeasuredChassisPose();  // [theta, roll, z, yaw]
-      Eigen::Vector4d d_prev = getActuatorPositions();    // [LF, LR, RF, RR]
-    
-      // Step 2: FK-estimated pose
-      auto [theta, phi, psi, z, _, __] = suspensionFK(d_prev[0], d_prev[1], d_prev[2], d_prev[3]);
-      Eigen::Vector4d P_est(theta, phi, z, psi);
-    
-      // Step 3: Jacobian (4x4)
-      Eigen::Matrix<double, 4, 4> J = manualJacobianFK4DOF(d_prev[0], d_prev[1], d_prev[2], d_prev[3]);
-    
-      // Step 4: Terrain estimation via ridge-regularized weighted least squares
-      Eigen::Vector4d residual = P_mea - P_est;
-    
-      Eigen::Vector4d weights(1.0, 0.1, 1.0, 1.0);  // Maybe change!!
-      Eigen::Matrix<double, 4, 4> Jw = J;
-      for (int i = 0; i < 4; ++i)
-        Jw.col(i) /= weights[i];
-    
-      Eigen::Matrix4d reg = lambda_ * Eigen::Matrix4d::Identity();
-      Eigen::Vector4d terrain_est = (Jw.transpose() * Jw + reg).ldlt().solve(Jw.transpose() * residual);
-      for (int i = 0; i < 4; ++i)
-        terrain_est[i] /= weights[i];
-    
-      // Step 5: PID control in pose space
-      Eigen::Vector4d e = P_r_ - P_est;
-      Eigen::Vector4d e_dot = (e - e_prev_full_) / dt;
-      e_int_full_ += e * dt;
-      e_prev_full_ = e;
-      Eigen::Vector4d u = K_P_* e + K_I_ * e_int_full_ + K_D_ * e_dot;
-    
-      // Step 6: Apply control law
-      Eigen::Vector4d delta_d = J.completeOrthogonalDecomposition().pseudoInverse() * (u - J * terrain_est);
-      Eigen::Vector4d d_new = d_prev + delta_d;
-    
-      // Clamp actuator commands
-      for (int i = 0; i < 4; ++i) {
-        d_new[i] = std::clamp(d_new[i], 0.0, 0.1);
-        (void)command_interfaces_[i].set_value(d_new[i]);
-      }
-    
-      // Optional: publish terrain estimate
-      if (terrain_pub_) {
-        std_msgs::msg::Float64MultiArray msg;
-        msg.data = {terrain_est[0], terrain_est[1], terrain_est[2], terrain_est[3]};
-        terrain_pub_->publish(msg);
-      }
     }
     
   
@@ -815,8 +703,6 @@ namespace suspension_controller {
     // Max roll- and pitch over angles
     std::tuple<double, double> SuspensionController::maxAngles(double z, double phi, double theta){
 
-      // MISSING TERRAIN ESTIMATION AND INCLUSION!!!
-
       const double H = 0.428;  // rocker length [m]
       const double T = 0.721;  // track width [m]
   
@@ -926,29 +812,16 @@ namespace suspension_controller {
     }
 
     
-
-
     // LQR solver - Need upgrade
-    Eigen::Matrix<double, 4, 3> SuspensionController::solveContinuousLQR(const Eigen::Matrix3d& A, const Eigen::Matrix<double, 3, 4>& B, const Eigen::Matrix3d& Q, const Eigen::Matrix4d& R){
+    Eigen::Matrix<double, 4, 3> SuspensionController::solveLQR(const Eigen::Matrix3d& A, const Eigen::Matrix<double, 3, 4>& B, const Eigen::Matrix3d& Q, const Eigen::Matrix4d& R){
         
         Eigen::Matrix<double, 4, 3> K_approx = R.inverse() * B.transpose() * Q;      // Approximate LQR solution: K ≈ (R⁻¹ * Bᵀ * Q)
 
       return K_approx;
     }
 
-    // Placement Suspension IK objective function
-    /*
-    Eigen::Vector4d SuspensionController::solveSuspensionIK(const Eigen::Vector3d& target_pose, const Eigen::Vector4d& d_initial) {
-      // Empty function for now
-      return Eigen::Vector4d::Zero();
-    }
-    */
-
+    // Inverse Kinematic solver
     Eigen::Vector4d SuspensionController::solveSuspensionIK(const Eigen::Vector3d& target_pose, const Eigen::Vector4d& /*d_initial*/) {
-
-      // MISSING YAW as input
-      // MISSING IMPLEMENTATINO OF D_INITIAL
-    
 
       // Parameters
       const double H = 0.428;  // rocker length [m]
@@ -981,24 +854,7 @@ namespace suspension_controller {
     
   
     /*
-    // LASSO
-    Eigen::Vector4d SuspensionController::estimateTerrainLASSO(const Eigen::Matrix<double, 3, 4> &J, const Eigen::Vector3d &residual, const Eigen::Vector4d &weights,double lambda){
-      // Weighted Jacobian
-      Eigen::Matrix<double, 3, 4> Jw = J;
-      for (int i = 0; i < 4; ++i)
-          Jw.col(i) /= weights[i];
-  
-      // Ridge regression approximation of LASSO
-      Eigen::Matrix4d reg = lambda * Eigen::Matrix4d::Identity();
-      Eigen::Vector4d terrain_est = (Jw.transpose() * Jw + reg).ldlt().solve(Jw.transpose() * residual);
-  
-      // Reapply weights
-      for (int i = 0; i < 4; ++i)
-          terrain_est[i] /= weights[i];
-  
-      return terrain_est;
-  }
-  */
+
   
   /*
   Eigen::Vector4d SuspensionController::estimateTerrainLASSO(
@@ -1055,28 +911,16 @@ namespace suspension_controller {
 }
 */
 
+// Placeholder for terrain estimator - IK terrain estimator on-board computer, LASSO terrain estimator above
 Eigen::Vector4d SuspensionController::estimateTerrainLASSO(
   const Eigen::Matrix<double, 3, 4> &J,
   const Eigen::Vector3d &residual,
   const Eigen::Vector4d &weights,
   double lambda)
 {
-  Eigen::MatrixXd X = J;
-  for (int i = 0; i < 4; ++i)
-      X.col(i) /= weights[i];
-  Eigen::VectorXd y = residual;
 
-  size_t n_iter = 100;
-  double epsilon = 1e-4;
-  Regressor *lasso = new Lasso(lambda, n_iter, epsilon);
-  lasso->fit(X, y);
-  Eigen::VectorXd beta = lasso->get_model().coef;  // ✅ fix here
+  Eigen::Vector4d terrain_est = Eigen::Vector4d::Zero();
 
-  Eigen::Vector4d terrain_est;
-  for (int i = 0; i < 4; ++i)
-      terrain_est[i] = beta(i) / weights[i];
-
-  delete lasso;
   return terrain_est;
 }
 

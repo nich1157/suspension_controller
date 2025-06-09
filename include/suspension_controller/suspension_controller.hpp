@@ -88,7 +88,6 @@ namespace suspension_controller {
       void runLQRControl(const rclcpp::Duration& period);
       void runIKControl(const rclcpp::Duration& period);
       void runPIDWithTerrain(const rclcpp::Duration& period);
-      void runPIDWithTerrainSquare(const rclcpp::Duration& period);
       void runPIDComplete(const rclcpp::Duration& period);
 
       // Helpers
@@ -96,7 +95,7 @@ namespace suspension_controller {
       Eigen::Vector4d getActuatorPositions();
       std::tuple<double, double, double, double, double, double> suspensionFK(double d_LF, double d_LR, double d_RF, double d_RR);
       Eigen::Matrix<double, 4, 4> manualJacobianFK4DOF(double d_LF, double d_LR, double d_RF, double d_RR);
-      Eigen::Matrix<double, 4, 3> solveContinuousLQR(const Eigen::Matrix3d& A, const Eigen::Matrix<double, 3, 4>& B, const Eigen::Matrix3d& Q, const Eigen::Matrix4d& R);
+      Eigen::Matrix<double, 4, 3> solveLQR(const Eigen::Matrix3d& A, const Eigen::Matrix<double, 3, 4>& B, const Eigen::Matrix3d& Q, const Eigen::Matrix4d& R);
       Eigen::Vector4d solveSuspensionIK(const Eigen::Vector3d& target_pose, const Eigen::Vector4d& d_initial);
       Eigen::Vector4d estimateTerrainLASSO(const Eigen::Matrix<double, 3, 4> &J, const Eigen::Vector3d &residual, const Eigen::Vector4d &weights, double lambda);
       std::tuple<double, double> maxAngles(double z, double phi, double theta);

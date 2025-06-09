@@ -78,6 +78,7 @@
         "future": "cpp",
         "shared_mutex": "cpp",
         "cfenv": "cpp",
-        "valarray": "cpp"
+        "valarray": "cpp",
+        "specialfunctions": "cpp"
     }
 }

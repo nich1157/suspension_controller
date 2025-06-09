@@ -14,8 +14,8 @@ find_package(pluginlib REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(tf2 REQUIRED)
-find_package(dlib REQUIRED)
-find_package(liblm_ros2 REQUIRED)
+#find_package(dlib REQUIRED)
+#find_package(liblm_ros2 REQUIRED)
 
 #find_package(Ceres REQUIRED)
 
@@ -40,7 +40,7 @@ ament_target_dependencies(${PROJECT_NAME}
   Eigen3
   sensor_msgs
   tf2
-  liblm_ros2
+  #liblm_ros2
   #Ceres
 )
 
