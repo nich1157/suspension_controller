@@ -5,7 +5,7 @@
   <version>0.0.0</version>
   <description>Custom suspension controller plugin for ROS 2</description>
   <maintainer email="nickfc1@hotmail.com">nichlas-kondrup</maintainer>
-  <license>TODO: License declaration</license>
+  <license>Apache-2.0</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
