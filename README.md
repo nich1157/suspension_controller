@@ -44,4 +44,4 @@ colcon test --packages-select suspension_controller
 3. Open a pull request describing your changes and testing steps.
 
 ## License
-This project is licensed under the Apache License 2.0. See the [LICENSE](LICENSE) file for details.
+An Apache-2.0 license file is included for clarity on reuse and distribution. If you plan to keep the code private or prefer a different license, update `package.xml` and adjust or remove the [LICENSE](LICENSE) file accordingly.
