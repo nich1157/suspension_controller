@@ -1,0 +1,26 @@
+# Build artifacts
+build/
+install/
+log/
+CMakeFiles/
+CMakeCache.txt
+*.cmake
+cmake_install.cmake
+Makefile
+
+# Editors and IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Generated files
+*.o
+*.so
+*.a
+*.dll
+*.dylib
+
+# Python cache
+__pycache__/
+*.pyc
